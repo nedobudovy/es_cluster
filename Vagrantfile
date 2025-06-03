@@ -6,6 +6,7 @@ VAGRANT_NETWORK_PREFIX = "192.168.56."
 
 Vagrant.configure("2") do |config|
   (1..VAGRANT_VM_COUNT).each do |i|
+    #Basic configuration of each node
     config.vm.define "node#{i}" do |node|
       node.vm.box = VAGRANT_BOX
       node.vm.hostname = "node#{i}"
@@ -17,8 +18,12 @@ Vagrant.configure("2") do |config|
         vb.cpus = VAGRANT_CPUS
       end
 
-      # Додаткові параметри (наприклад, синхронізація папки, provisioners тощо)
-      # node.vm.synced_folder "./shared", "/vagrant_data"
+      #Shell provisioning
+      node.vm.provision "shell", inline: <<-SHELL
+        sudo yum -y install epel-release
+        sudo yum -y install ansible
+      SHELL
+
     end
   end
 end
