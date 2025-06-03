@@ -4,7 +4,7 @@
 
 All you have to do to deploy it: just clone this repo:
 ```
-git clone *repo_url*
+git clone https://github.com/nedobudovy/es_cluster/tree/master
 ```
 
 
