@@ -1,0 +1,11 @@
+---
+- name: Adding ElasticSearch repo
+  ansible.builtin.include_tasks: add-repo.yml
+- name: Dependencies task
+  ansible.builtin.include_tasks: dependencies.yml
+- name: Including installation task
+  ansible.builtin.include_tasks: install.yml
+- name: Including configuring task
+  ansible.builtin.include_tasks: configure.yml
+- name: Including starting the service task
+  ansible.builtin.include_tasks: service-start.yml

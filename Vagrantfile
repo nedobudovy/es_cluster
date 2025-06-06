@@ -1,6 +1,6 @@
 VAGRANT_VM_COUNT = 3
 VAGRANT_BOX = "rockylinux/9"
-VAGRANT_MEMORY = 2048
+VAGRANT_MEMORY = 4096
 VAGRANT_CPUS = 2
 VAGRANT_NETWORK_PREFIX = "192.168.56."
 
@@ -19,11 +19,20 @@ Vagrant.configure("2") do |config|
         vb.cpus = VAGRANT_CPUS
       end
 
+      node.vm.provision "shell" do |s|
+        ssh_pub_key = File.readlines(File.expand_path("~/.ssh/es_cluster.pub")).first.strip
+        s.inline = <<-SHELL
+          echo #{ssh_pub_key} >> /home/vagrant/.ssh/authorized_keys
+          echo #{ssh_pub_key} >> /root/.ssh/authorized_keys
+        SHELL
+      end
+
       node.vm.provision "shell", inline: <<-SHELL
         sudo dnf update -y
         sudo dnf -y install epel-release
         sudo dnf -y install ansible
       SHELL
+
     end
   end
 end

@@ -1,0 +1,11 @@
+---
+
+- name: 
+  hosts: 
+    - es_cluster
+    - kibana
+  become: yes
+  roles:
+    - elasticsearch
+    - kibana
+

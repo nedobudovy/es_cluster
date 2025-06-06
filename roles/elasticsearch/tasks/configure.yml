@@ -1,0 +1,47 @@
+---
+
+- name: Create systemd override directory for elasticsearch
+  become: yes
+  file:
+    path: /etc/systemd/system/elasticsearch.service.d
+    state: directory
+    mode: 0755
+
+- name: Set memlock limits in limits.conf for elasticsearch user
+  become: yes
+  blockinfile:
+    path: /etc/security/limits.conf
+    block: |
+      elasticsearch soft memlock unlimited
+      elasticsearch hard memlock unlimited
+    state: present
+
+- name: Set LimitMEMLOCK in systemd override
+  become: yes
+  copy:
+    dest: /etc/systemd/system/elasticsearch.service.d/override.conf
+    content: |
+      [Service]
+      LimitMEMLOCK=infinity
+    mode: 0644
+
+- name: Configuration of JVM for ElasticSearch
+  become: yes
+  ansible.builtin.template:
+    src: templates/custom_heap_size.options.j2
+    dest: /etc/elasticsearch/jvm.options.d/custom_heap_size.options
+    owner: elasticsearch
+    group: elasticsearch
+    mode: '0644'
+
+- name: Configuration of ElasticSearch
+  become: yes
+  ansible.builtin.template:
+    src: templates/elasticsearch.yml.j2
+    dest: /etc/elasticsearch/elasticsearch.yml
+    owner: elasticsearch
+    group: elasticsearch
+    mode: '0644'
+  
+
+

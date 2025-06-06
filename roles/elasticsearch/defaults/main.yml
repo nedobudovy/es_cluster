@@ -1,0 +1,7 @@
+---
+# Default variables for the elasticsearch role
+java_package: java-17-openjdk
+es_version: 9.x
+es_http_port: 9200
+es_cluster_name: elastic_cluster
+es_heap_size: 2G

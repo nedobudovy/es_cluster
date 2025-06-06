@@ -23,6 +23,16 @@ check_command "ansible" "Ansible"
 echo "-------------------------"
 echo "All tools are installed successfully"
 
-# Starting this bad boy (Vagrant)
+# Generating key for access to the VM's and for ansible
+ssh-keygen -q -t rsa -b 4096 -f ~/.ssh/es_cluster -N ""
 
+# Installing an ansible collection to work with elasticsearch
+ansible-galaxy collection install community.elastic
+
+# Installing the dependencies
+pip install elasticsearch
+
+# Starting this bad boy (Vagrant)
 vagrant up
+
+ansible-playbook ./playbooks/elasticsearch.yml

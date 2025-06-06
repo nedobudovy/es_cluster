@@ -1,0 +1,17 @@
+---
+- name: Ensure Elasticsearch YUM repository is added and configured
+  ansible.builtin.yum_repository:
+    name: elasticsearch
+    description: Elasticsearch repository for {{ es_version }} packages
+    baseurl: https://artifacts.elastic.co/packages/{{ es_version }}/yum
+    gpgcheck: yes
+    gpgkey: https://artifacts.elastic.co/GPG-KEY-elasticsearch
+    enabled: yes
+    file: elasticsearch
+    owner: root
+    group: root
+    mode: '0644'
+  when: ansible_os_family == "RedHat"
+  tags:
+    - repo
+    - install
