@@ -1,54 +1,64 @@
 ---
-- name: Configuring and Deploying ElasticSearch node
-  hosts: es_cluster
+- name: Deploy Elasticsearch Master Nodes
+  hosts: elasticsearch_master_nodes
   become: yes
   roles:
     - role: elastic.elasticsearch
   vars:
-    es_version: 8.9.0
+    es_version: "8.9.0"
+    es_heap_size: "2g"
     es_config:
       node.name: "{{ es_node_name }}"
-      cluster.name: "my-es-cluster"
+      cluster.name: "production-cluster"
       network.host: "0.0.0.0"
       http.port: 9200
-      xpack.security.enabled: true
+      transport.port: 9300
+      node.master: true
+      node.data: false
+      discovery.seed_hosts: "{{ groups['elasticsearch_master_nodes'] | join(',') }}"
+      cluster.initial_master_nodes: "{{ groups['elasticsearch_master_nodes'] | join(',') }}"
       bootstrap.memory_lock: true
-    es_heap_size: 2g
+      xpack.security.enabled: true
 
-  tasks:
-    - name: Set memlock soft limit for elasticsearch user
-      lineinfile:
-        path: /etc/security/limits.conf
-        line: "elasticsearch soft memlock unlimited"
-        state: present
+- name: Deploy Elasticsearch Master-Data Nodes
+  hosts: es_master_data_nodes
+  become: yes
+  roles:
+    - role: elastic.elasticsearch
+  vars:
+    es_version: "8.9.0"
+    es_heap_size: "2g" # should be 4 gb but i was doing it on-prem on my laptop so there is no enough space for it :(
+    es_config:
+      node.name: "{{ es_node_name }}"
+      cluster.name: "production-cluster"
+      network.host: "0.0.0.0"
+      http.port: 9200
+      transport.port: 9300
+      node.roles:
+        - master
+        - data
+      discovery.seed_hosts: "{{ groups['es_master_data_nodes'] | join(',') }}" # should be es_master_nodes but also on-prem stuff :(
+      cluster.initial_master_nodes: "{{ groups['es_master_data_nodes'] | join(',') }}"
+      bootstrap.memory_lock: true
+      xpack.security.enabled: true
 
-    - name: Set memlock hard limit for elasticsearch user
-      lineinfile:
-        path: /etc/security/limits.conf
-        line: "elasticsearch hard memlock unlimited"
-        state: present
-
-    - name: Create systemd override directory for elasticsearch service
-      file:
-        path: /etc/systemd/system/elasticsearch.service.d
-        state: directory
-        mode: '0755'
-
-    - name: Configure systemd LimitMEMLOCK for elasticsearch service
-      copy:
-        dest: /etc/systemd/system/elasticsearch.service.d/override.conf
-        content: |
-          [Service]
-          LimitMEMLOCK=infinity
-      notify:
-        - Reload systemd
-
-  handlers:
-    - name: Reload systemd
-      systemd:
-        daemon_reload: yes
-
-    - name: Restart Elasticsearch
-      service:
-        name: elasticsearch
-        state: restarted
+- name: Deploy Elasticsearch Data Nodes
+  hosts: elasticsearch_data_nodes
+  become: yes
+  roles:
+    - role: elastic.elasticsearch
+  vars:
+    es_version: "8.9.0"
+    es_heap_size: "8g"
+    es_config:
+      node.name: "{{ inventory_hostname }}"
+      cluster.name: "production-cluster"
+      network.host: "_eth0_,_local_"
+      http.port: 9200
+      transport.port: 9300
+      node.master: false
+      node.data: true
+      discovery.seed_hosts: "{{ groups['elasticsearch_master_nodes'] | join(',') }}"
+      cluster.initial_master_nodes: "{{ groups['elasticsearch_master_nodes'] | join(',') }}"
+      bootstrap.memory_lock: true
+      xpack.security.enabled: true

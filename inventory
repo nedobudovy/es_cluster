@@ -1,4 +1,4 @@
-[es_cluster]
+[es_master_data_nodes]
 192.168.56.101 es_node_name=node1
 192.168.56.102 es_node_name=node2
 192.168.56.103 es_node_name=node3
