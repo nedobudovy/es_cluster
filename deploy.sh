@@ -32,4 +32,4 @@ pip install elasticsearch
 # Starting this bad boy (Vagrant)
 vagrant up
 
-ansible-playbook ./playbooks/elasticsearch.yml
+ansible-playbook ./playbooks/deploy.yml
