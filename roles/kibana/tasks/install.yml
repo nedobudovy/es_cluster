@@ -1,0 +1,29 @@
+---   
+- name: Add Elastic GPG key (Debian)
+  ansible.builtin.shell: |
+    wget -qO - https://artifacts.elastic.co/GPG-KEY-elasticsearch | gpg --dearmor -o /usr/share/keyrings/elasticsearch-keyring.gpg
+  args:
+    creates: /usr/share/keyrings/elasticsearch-keyring.gpg
+  when: ansible_os_family == 'Debian'
+
+- name: Add Elastic repository (Debian)
+  ansible.builtin.apt_repository:
+    repo: deb [signed-by=/usr/share/keyrings/elasticsearch-keyring.gpg] https://artifacts.elastic.co/packages/{{ kibana_version.split('.')[0] }}.x/apt stable main
+    state: present
+  when: ansible_os_family == 'Debian'
+
+- name: Add Elastic repository (RedHat)
+  ansible.builtin.yum_repository:
+    name: kibana-{{ kibana_version.split('.')[0] }}.x
+    description: Kibana repository for {{ kibana_version.split('.')[0] }}.x packages
+    baseurl: https://artifacts.elastic.co/packages/{{ kibana_version.split('.')[0] }}.x/yum
+    gpgcheck: yes
+    gpgkey: https://artifacts.elastic.co/GPG-KEY-elasticsearch
+    sslverify: yes
+    sslcacert: /etc/pki/tls/certs/ca-bundle.crt
+  when: ansible_os_family == 'RedHat'
+
+- name: Install Kibana
+  ansible.builtin.package:
+    name: kibana
+    state: present

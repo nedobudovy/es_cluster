@@ -4,3 +4,5 @@
   become: yes
   roles:
     - role: elasticsearch
+  vars:
+    es_self_signed_certs: true

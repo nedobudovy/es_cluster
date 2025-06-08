@@ -1,0 +1,64 @@
+---
+- name: Fetch CA certificate from es_ca_node
+  ansible.builtin.fetch:
+    src: "{{ es_ca_cert }}"
+    dest: /tmp/ca.crt
+    flat: yes
+  delegate_to: "{{ es_ca_node }}"
+  vars:
+    es_ca_node: "{{ groups['es_nodes'][0] }}"
+    es_ca_cert: "/etc/elasticsearch/certs/ca.crt"
+
+
+- name: Create certificates directory for Kibana
+  ansible.builtin.file:
+    path: "{{ certificates_dir_kibana }}"
+    state: directory
+    mode: '0750'
+    owner: kibana
+    group: kibana
+
+- name: Copy CA certificate to Kibana nodes
+  ansible.builtin.copy:
+    src: /tmp/ca.crt
+    dest: "{{ ca_cert_kibana }}"
+    mode: '0640'
+    owner: kibana
+    group: kibana
+
+- name: Open Kibana ports in firewalld
+  ansible.builtin.command: >
+    firewall-cmd --permanent --add-port={{ kibana_port }}/tcp
+  become: true
+
+- name: Configure Kibana
+  ansible.builtin.template:
+    src: templates/kibana.yml.j2
+    dest: /etc/kibana/kibana.yml
+    mode: '0644'
+    owner: kibana
+    group: kibana
+  notify: restart kibana
+
+- name: Ensure /usr/share/kibana ownership
+  ansible.builtin.file:
+    path: /usr/share/kibana
+    owner: kibana
+    group: kibana
+    recurse: yes
+  become: true
+
+- name: Ensure /var/log/kibana directory exists and is owned by kibana
+  ansible.builtin.file:
+    path: /var/log/kibana
+    state: directory
+    owner: kibana
+    group: kibana
+    mode: '0750'
+    recurse: yes
+
+- name: Start Kibana service
+  ansible.builtin.systemd:
+    name: kibana
+    state: started
+    enabled: yes

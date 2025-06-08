@@ -1,0 +1,8 @@
+---
+es_ca_node: "{{ groups['es_nodes'][0] }}"
+es_ca_cert: "/etc/elasticsearch/certs/ca.crt"
+certificates_dir_kibana: "/etc/kibana/certs"
+ca_cert_kibana: "{{ certificates_dir_kibana }}/ca.crt"
+elasticsearch_hosts: >-
+  {{ groups['es_nodes'] | map('regex_replace', '^', 'https://') | 
+     map('regex_replace', '$', ':9200') | list }}

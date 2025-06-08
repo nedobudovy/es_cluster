@@ -1,0 +1,9 @@
+---
+- name: restart kibana
+  ansible.builtin.systemd:
+    name: kibana
+    state: restarted
+  register: kibana_restart
+  retries: 3
+  delay: 5
+  until: kibana_restart is success

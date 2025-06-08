@@ -1,0 +1,5 @@
+---
+kibana_version: "8.10.0"
+kibana_port: 5601
+elasticsearch_username: "kibana_system"
+elasticsearch_password: "change"  # Please override this with the actual password

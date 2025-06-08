@@ -1,0 +1,17 @@
+server.host: "{{ inventory_hostname }}"
+server.port: {{ kibana_port }} # Changed to more privacy or smth
+elasticsearch.hosts: {{ elasticsearch_hosts | to_json }}
+elasticsearch.username: "{{ elasticsearch_username }}"
+elasticsearch.password: "{{ elasticsearch_password }}"
+elasticsearch.ssl.certificateAuthorities: ["{{ ca_cert_kibana }}"]
+
+logging:
+  appenders:
+    file:
+      type: file
+      fileName: /var/log/kibana/kibana.log
+      layout:
+        type: json
+  root:
+    appenders: [file]
+    level: info

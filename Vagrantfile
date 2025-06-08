@@ -1,4 +1,4 @@
-VAGRANT_VM_COUNT = 1 # Change it to 3 for prod, please... Don't forget it :)
+VAGRANT_VM_COUNT = 3 # Change it to 3 for prod, please... Don't forget it :)
 VAGRANT_BOX = "rockylinux/9"
 VAGRANT_MEMORY = 4096
 VAGRANT_CPUS = 2
@@ -39,6 +39,7 @@ Vagrant.configure("2") do |config|
       node.vm.hostname = "kibana"
 
       node.vm.network "private_network", ip: "#{VAGRANT_NETWORK_PREFIX}99"
+      node.vm.network "forwarded_port", guest: 5601, host: 5601
 
       node.vm.provider "virtualbox" do |vb|
         vb.name = "kibana"
