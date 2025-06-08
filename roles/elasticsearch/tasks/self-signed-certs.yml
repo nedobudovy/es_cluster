@@ -1,0 +1,136 @@
+---
+- name: Create certificates directory
+  ansible.builtin.file:
+    path: "{{ certificates_dir }}"
+    state: directory
+    mode: '0750'
+    owner: elasticsearch
+    group: elasticsearch
+  become: true
+
+- name: Generate CA private key
+  community.crypto.openssl_privatekey:
+    path: "{{ ca_key }}"
+    owner: elasticsearch
+    group: elasticsearch
+    mode: '0600'
+  become: true
+  delegate_to: "{{ ca_node }}"
+
+- name: Generate CA CSR with extensions
+  community.crypto.openssl_csr:
+    path: "{{ certificates_dir }}/ca.csr"
+    privatekey_path: "{{ ca_key }}"
+    subject:
+      commonName: "my-elastic-cluster CA"
+    basic_constraints: "CA:TRUE,pathlen:0"
+    key_usage:
+      - keyCertSign
+      - cRLSign
+    owner: elasticsearch
+    group: elasticsearch
+    mode: '0644'
+  become: true
+  delegate_to: "{{ ca_node }}"
+
+- name: Generate self-signed CA certificate from CSR
+  community.crypto.x509_certificate:
+    path: "{{ ca_cert }}"
+    privatekey_path: "{{ ca_key }}"
+    csr_path: "{{ certificates_dir }}/ca.csr"
+    provider: selfsigned
+    owner: elasticsearch
+    group: elasticsearch
+    mode: '0644'
+  become: true
+  delegate_to: "{{ ca_node }}"
+
+- name: Remove CA CSR (optional cleanup)
+  ansible.builtin.file:
+    path: "{{ certificates_dir }}/ca.csr"
+    state: absent
+  become: true
+  delegate_to: "{{ ca_node }}"
+
+- name: Fetch CA certificate to control node
+  ansible.builtin.fetch:
+    src: "{{ ca_cert }}"
+    dest: "/tmp/ca.crt"
+    flat: yes
+  delegate_to: "{{ ca_node }}"
+
+- name: Distribute CA certificate to all nodes
+  ansible.builtin.copy:
+    src: "/tmp/ca.crt"
+    dest: "{{ ca_cert }}"
+    mode: '0640'
+    owner: elasticsearch
+    group: elasticsearch
+  become: true
+
+- name: Generate node private key
+  community.crypto.openssl_privatekey:
+    path: "{{ node_key }}"
+    owner: elasticsearch
+    group: elasticsearch
+    mode: '0600'
+  become: true
+
+- name: Generate node CSR
+  community.crypto.openssl_csr:
+    path: "{{ certificates_dir }}/{{ inventory_hostname }}.csr"
+    privatekey_path: "{{ node_key }}"
+    subject:
+      commonName: "{{ es_node_name | default(inventory_hostname) }}"
+    subject_alt_name: "IP:{{ inventory_hostname }}"
+    owner: elasticsearch
+    group: elasticsearch
+    mode: '0644'
+  become: true
+
+- name: Fetch CSR from each node to control node
+  ansible.builtin.fetch:
+    src: "{{ certificates_dir }}/{{ inventory_hostname }}.csr"
+    dest: "/tmp/csrs/"
+    flat: yes
+  become: true
+
+- name: Copy CSR to ca_node
+  ansible.builtin.copy:
+    src: "/tmp/csrs/{{ item }}.csr"
+    dest: "/tmp/{{ item }}.csr"
+  delegate_to: "{{ ca_node }}"
+  loop: "{{ groups['es_nodes'] }}"
+
+- name: Sign CSRs on ca_node
+  community.crypto.x509_certificate:
+    path: "/tmp/{{ item }}.crt"
+    csr_path: "/tmp/{{ item }}.csr"
+    provider: ownca
+    ownca_path: "{{ ca_cert }}"
+    ownca_privatekey_path: "{{ ca_key }}"
+    ownca_not_after: +365d
+    ownca_not_before: "-1d"
+    owner: elasticsearch
+    group: elasticsearch
+    mode: '0644'
+  become: true
+  delegate_to: "{{ ca_node }}"
+  loop: "{{ groups['es_nodes'] }}"
+
+- name: Fetch signed certificates to control node
+  ansible.builtin.fetch:
+    src: "/tmp/{{ item }}.crt"
+    dest: "/tmp/{{ item }}.crt"
+    flat: yes
+  delegate_to: "{{ ca_node }}"
+  loop: "{{ groups['es_nodes'] }}"
+
+- name: Distribute signed certificates to each node
+  ansible.builtin.copy:
+    src: "/tmp/{{ inventory_hostname }}.crt"
+    dest: "{{ node_cert }}"
+    mode: '0640'
+    owner: elasticsearch
+    group: elasticsearch
+  become: true

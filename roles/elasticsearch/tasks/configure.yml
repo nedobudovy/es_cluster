@@ -1,47 +1,96 @@
----
-
-- name: Create systemd override directory for elasticsearch
-  become: yes
-  file:
-    path: /etc/systemd/system/elasticsearch.service.d
-    state: directory
-    mode: 0755
-
-- name: Set memlock limits in limits.conf for elasticsearch user
-  become: yes
-  blockinfile:
-    path: /etc/security/limits.conf
-    block: |
-      elasticsearch soft memlock unlimited
-      elasticsearch hard memlock unlimited
+- name: Set JVM options
+  ansible.builtin.lineinfile:
+    path: /etc/elasticsearch/jvm.options
+    line: "{{ item }}"
     state: present
+  loop: "{{ es_jvm_options }}"
+  become: true
 
-- name: Set LimitMEMLOCK in systemd override
-  become: yes
-  copy:
-    dest: /etc/systemd/system/elasticsearch.service.d/override.conf
-    content: |
-      [Service]
-      LimitMEMLOCK=infinity
-    mode: 0644
-
-- name: Configuration of JVM for ElasticSearch
-  become: yes
+- name: Editing the config file of ElasticSearch
   ansible.builtin.template:
-    src: templates/custom_heap_size.options.j2
-    dest: /etc/elasticsearch/jvm.options.d/custom_heap_size.options
-    owner: elasticsearch
-    group: elasticsearch
-    mode: '0644'
-
-- name: Configuration of ElasticSearch
-  become: yes
-  ansible.builtin.template:
-    src: templates/elasticsearch.yml.j2
+    src: elasticsearch.yml.j2
     dest: /etc/elasticsearch/elasticsearch.yml
+    mode: '0644'
     owner: elasticsearch
     group: elasticsearch
-    mode: '0644'
-  
+  become: true
 
+- name: Create the elasticsearch keystore if it does not exist
+  command: >
+    /usr/share/elasticsearch/bin/elasticsearch-keystore create
+  args:
+    creates: /etc/elasticsearch/elasticsearch.keystore
+  environment:
+    ES_PATH_CONF: /etc/elasticsearch
+  become: true
 
+- name: Check if bootstrap.password is already set in keystore
+  command: >
+    /usr/share/elasticsearch/bin/elasticsearch-keystore list
+  register: keystore_list
+  changed_when: false
+  environment:
+    ES_PATH_CONF: /etc/elasticsearch
+  become: true
+
+- name: Set bootstrap.password in keystore if not set
+  shell: echo "{{ es_users.elastic }}" | /usr/share/elasticsearch/bin/elasticsearch-keystore add --force -x 'bootstrap.password'
+  when: "'bootstrap.password' not in keystore_list.stdout_lines"
+  become: true
+
+- name: Ensure /usr/share/elasticsearch ownership is elasticsearch:elasticsearch
+  ansible.builtin.file:
+    path: /usr/share/elasticsearch
+    owner: elasticsearch
+    group: elasticsearch
+    recurse: yes
+  become: true
+
+- name: Open Elasticsearch ports in firewalld
+  ansible.builtin.command: >
+    firewall-cmd --permanent --add-port={{ item }}/tcp
+  loop:
+    - 9200
+    - 9300
+  become: true
+
+- name: Reload firewalld
+  ansible.builtin.command: firewall-cmd --reload
+  become: true
+
+- name: Start Elasticsearch service
+  ansible.builtin.systemd:
+    name: elasticsearch
+    state: started
+    enabled: yes
+  become: true
+
+- name: Verify Elasticsearch is ready
+  ansible.builtin.uri:
+    url: "https://{{ inventory_hostname }}:9200/_cluster/health?pretty"
+    method: GET
+    validate_certs: "{{ false if es_self_signed_certs else true }}"
+    user: elastic
+    password: "{{ es_users.elastic }}"
+    force_basic_auth: yes
+    status_code: 200
+  register: es_health
+  until: es_health.status == 200 and es_health.json.status in ['green', 'yellow']
+  retries: 30
+  delay: 10
+  when: inventory_hostname == ca_node and es_initial_run
+
+- name: Change kibana user password via API
+  ansible.builtin.uri:
+    url: "https://{{ inventory_hostname }}:9200/_security/user/kibana_system/_password"
+    method: POST
+    validate_certs: "{{ false if es_self_signed_certs else true }}"
+    user: elastic
+    password: "{{ es_users.elastic }}"
+    force_basic_auth: yes
+    body: '{"password": "{{ es_users.kibana_system }}"}'
+    body_format: json
+  register: result
+  until: result.status == 200
+  retries: 5
+  delay: 2

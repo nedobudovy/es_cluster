@@ -1,0 +1,28 @@
+---
+- name: Wait for cluster health to stabilize
+  ansible.builtin.uri:
+    url: "https://{{ inventory_hostname }}:9200/_cluster/health?pretty"
+    method: GET
+    validate_certs: "{{ false if es_self_signed_certs else true }}"
+    user: elastic
+    password: "{{ es_users.elastic }}"
+    force_basic_auth: yes
+    status_code: 200
+  register: es_health
+  until: es_health.json.status in ['yellow', 'green']
+  retries: 15
+  delay: 10
+  when: inventory_hostname == ca_node and es_initial_run
+
+- name: Flush handlers
+  ansible.builtin.meta: flush_handlers
+
+- name: Display cluster initialization info
+  ansible.builtin.debug:
+    msg: |
+      Elasticsearch cluster deployed!
+      Initial credentials:
+        elastic: {{ es_users.elastic }}
+        kibana_system: {{ es_users.kibana_system }}
+  when: inventory_hostname == ca_node and es_initial_run
+  run_once: true

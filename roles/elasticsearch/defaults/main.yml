@@ -1,7 +1,19 @@
 ---
-# Default variables for the elasticsearch role
-java_package: java-17-openjdk
-es_version: 9.x
-es_http_port: 9200
-es_cluster_name: elastic_cluster
-es_heap_size: 2G
+es_version: "8.10.0"
+es_cluster_name: "my-elastic-cluster"
+certificates_dir: "/etc/elasticsearch/certs"
+ca_key: "{{ certificates_dir }}/ca.key"
+ca_cert: "{{ certificates_dir }}/ca.crt"
+node_key: "{{ certificates_dir }}/node.key"
+node_cert: "{{ certificates_dir }}/node.crt"
+ca_node: "{{ groups['es_nodes'][0] }}"
+discovery_seed_hosts: "{{ groups['es_nodes'] | map('extract', hostvars, ['ansible_default_ipv4','address']) | list }}"
+initial_master_nodes: "{{ groups['es_nodes'] | map('extract', hostvars, ['ansible_default_ipv4','address']) | list }}"
+es_jvm_options:
+  - "-Xms1g"
+  - "-Xmx1g"
+es_users:
+  elastic: "{{ vault_elastic_password | default('change') }}"
+  kibana_system: "{{ vault_kibana_password | default('change') }}"
+es_initial_run: true
+es_self_signed_certs: false

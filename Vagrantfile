@@ -1,4 +1,4 @@
-VAGRANT_VM_COUNT = 3
+VAGRANT_VM_COUNT = 1 # Change it to 3 for prod, please... Don't forget it :)
 VAGRANT_BOX = "rockylinux/9"
 VAGRANT_MEMORY = 4096
 VAGRANT_CPUS = 2
@@ -32,7 +32,33 @@ Vagrant.configure("2") do |config|
         sudo dnf -y install epel-release
         sudo dnf -y install ansible
       SHELL
+    end
 
+    config.vm.define "kibana" do |node|
+      node.vm.box = VAGRANT_BOX
+      node.vm.hostname = "kibana"
+
+      node.vm.network "private_network", ip: "#{VAGRANT_NETWORK_PREFIX}99"
+
+      node.vm.provider "virtualbox" do |vb|
+        vb.name = "kibana"
+        vb.memory = VAGRANT_MEMORY
+        vb.cpus = VAGRANT_CPUS
+      end
+
+      node.vm.provision "shell" do |s|
+        ssh_pub_key = File.readlines(File.expand_path("~/.ssh/es_cluster.pub")).first.strip
+        s.inline = <<-SHELL
+          echo #{ssh_pub_key} >> /home/vagrant/.ssh/authorized_keys
+          echo #{ssh_pub_key} >> /root/.ssh/authorized_keys
+        SHELL
+      end
+
+      node.vm.provision "shell", inline: <<-SHELL
+        #sudo dnf update -y
+        sudo dnf -y install epel-release
+        sudo dnf -y install ansible
+      SHELL
     end
   end
 end

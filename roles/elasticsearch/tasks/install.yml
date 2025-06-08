@@ -1,8 +1,48 @@
 ---   
-- name: Install ElasticSearch
-  yum:
+- name: Add Elastic GPG key (Debian)
+  ansible.builtin.apt_key:
+    url: https://artifacts.elastic.co/GPG-KEY-elasticsearch
+    state: present
+  when: ansible_os_family == 'Debian'
+
+- name: Add Elastic repository (Debian)
+  ansible.builtin.apt_repository:
+    repo: deb https://artifacts.elastic.co/packages/{{ es_version.split('.')[0] }}.x/apt stable main
+    state: present
+  when: ansible_os_family == 'Debian'
+
+- name: Add Elastic repository (RedHat)
+  ansible.builtin.yum_repository:
+    name: elasticsearch
+    description: Elastic repository for {{ es_version }}
+    baseurl: https://artifacts.elastic.co/packages/{{ es_version.split('.')[0] }}.x/yum
+    gpgcheck: yes
+    gpgkey: https://artifacts.elastic.co/GPG-KEY-elasticsearch
+    sslverify: yes
+    sslcacert: /etc/pki/tls/certs/ca-bundle.crt
+  when: ansible_os_family == 'RedHat'
+
+- name: Install Elasticsearch
+  ansible.builtin.package:
     name: elasticsearch
     state: present
-  when: ansible_os_family == "RedHat"
-  tags:
-    - install
+
+- name: Install python3-pip package
+  ansible.builtin.package:
+    name: python3-pip
+    state: present
+  register: pip_install
+  retries: 3
+  delay: 5
+  until: pip_install is success
+  when: ansible_os_family in ["Debian", "RedHat"]
+
+- name: Install compatible elasticsearch Python library using pip
+  ansible.builtin.pip:
+    name: "elasticsearch>=8.0.0,<9.0.0"
+    state: present
+    executable: pip3
+  register: elasticsearch_install
+  retries: 3
+  delay: 5
+  until: elasticsearch_install is success

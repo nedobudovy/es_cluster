@@ -1,11 +1,17 @@
 ---
-- name: Adding ElasticSearch repo
-  ansible.builtin.include_tasks: add-repo.yml
-- name: Dependencies task
-  ansible.builtin.include_tasks: dependencies.yml
 - name: Including installation task
   ansible.builtin.include_tasks: install.yml
+
+- name: Including distributing certs task (Self-signed for testing)
+  ansible.builtin.include_tasks: self-signed-certs.yml # Has to be changed to task which deals with signed certs
+  when: es_self_signed_certs == true
+
+- name: Including distributing certs task (Signed for prod)
+  ansible.builtin.include_tasks: certs_config.yml
+  when: es_self_signed_certs == false
+
 - name: Including configuring task
   ansible.builtin.include_tasks: configure.yml
-- name: Including starting the service task
-  ansible.builtin.include_tasks: service-start.yml
+
+- name: Including checking the health task
+  ansible.builtin.include_tasks: health_check.yml
