@@ -1,8 +1,6 @@
 ---
-- name: Deploy Elastcsearch
+- name: Deploy Kibana
   hosts: kibana
   become: yes
   roles:
     - role: kibana
-  vars:
-    es_self_signed_certs: true
