@@ -26,9 +26,6 @@ echo "All tools are installed successfully"
 # Generating key for access to the VM's and for ansible
 ssh-keygen -q -t rsa -b 4096 -f ~/.ssh/es_cluster -N ""
 
-# Installing an ansible collection to work with elasticsearch
-ansible-galaxy collection install community.elastic
-
 # Installing the dependencies
 pip install elasticsearch
 
