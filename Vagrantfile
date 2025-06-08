@@ -28,7 +28,7 @@ Vagrant.configure("2") do |config|
       end
 
       node.vm.provision "shell", inline: <<-SHELL
-        sudo dnf update -y
+        #sudo dnf update -y
         sudo dnf -y install epel-release
         sudo dnf -y install ansible
       SHELL

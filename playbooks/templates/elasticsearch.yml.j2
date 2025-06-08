@@ -1,0 +1,23 @@
+cluster.name: my_cluster
+node.name: {{ es_node_name }}
+network.host: {{ inventory_hostname }}
+network.publish_host: {{ inventory_hostname }}
+http.port: 9200
+discovery.seed_hosts:
+{% for host in groups['es_nodes'] %}
+  - {{ hostvars[host].inventory_hostname }}
+{% endfor %}
+
+cluster.initial_master_nodes:
+{% for host in groups['es_nodes'] %}
+  - {{ hostvars[host].es_node_name }}
+{% endfor %}
+xpack.security.enabled: true
+xpack.security.http.ssl.enabled: true
+xpack.security.http.ssl.key: {{ node_key }}
+xpack.security.http.ssl.certificate: {{ node_cert }}
+xpack.security.http.ssl.certificate_authorities: ["{{ ca_cert }}"]
+xpack.security.transport.ssl.enabled: true
+xpack.security.transport.ssl.key: {{ node_key }}
+xpack.security.transport.ssl.certificate: {{ node_cert }}
+xpack.security.transport.ssl.certificate_authorities: ["{{ ca_cert }}"]

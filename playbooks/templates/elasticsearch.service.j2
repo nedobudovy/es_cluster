@@ -1,0 +1,25 @@
+[Unit]
+Description=Elasticsearch
+Documentation=https://www.elastic.co/guide/en/elasticsearch/reference/current/index.html
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+User=elasticsearch
+Group=elasticsearch
+WorkingDirectory={{ elasticsearch_home }}
+ExecStart={{ elasticsearch_home }}/bin/elasticsearch
+LimitNOFILE=65536
+LimitMEMLOCK=unlimited
+LimitCPU=unlimited
+LimitRSS=unlimited
+LimitAS=unlimited
+UMask=0027
+Nice=0
+Environment="ES_PATH_CONF=/etc/elasticsearch"
+Environment="TMPDIR=/tmp"
+Environment="ES_JAVA_OPTS=-Xms512m -Xmx512m"
+SuccessExitStatus=143
+
+[Install]
+WantedBy=multi-user.target

@@ -27,20 +27,26 @@
     - role: elastic.elasticsearch
   vars:
     es_version: "8.9.0"
-    es_heap_size: "2g" # should be 4 gb but i was doing it on-prem on my laptop so there is no enough space for it :(
+    es_heap_size: "2g"
+    es_enable_auto_configure: true
+    es_ssl_upload: true
+    es_ssl_remote_src: false
+    es_node_name: "{{ inventory_hostname }}"
     es_config:
       node.name: "{{ es_node_name }}"
       cluster.name: "production-cluster"
       network.host: "0.0.0.0"
       http.port: 9200
       transport.port: 9300
-      node.roles:
-        - master
-        - data
-      discovery.seed_hosts: "{{ groups['es_master_data_nodes'] | join(',') }}" # should be es_master_nodes but also on-prem stuff :(
-      cluster.initial_master_nodes: "{{ groups['es_master_data_nodes'] | join(',') }}"
+      node.roles: ["master", "data"]
+      discovery.seed_hosts: "{{ groups['es_master_data_nodes'] }}"
+      cluster.initial_master_nodes: "{{ groups['es_master_data_nodes'] }}"
       bootstrap.memory_lock: true
-      xpack.security.enabled: true
+    es_security_enabled: true
+    es_enable_transport_ssl: true
+    es_enable_http_ssl: true
+    es_api_basic_auth_username: "elastic"
+    es_api_basic_auth_password: "your_secure_password"  # Replace with a secure password, preferably using Ansible Vault
 
 - name: Deploy Elasticsearch Data Nodes
   hosts: elasticsearch_data_nodes

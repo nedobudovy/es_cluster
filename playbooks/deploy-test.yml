@@ -1,0 +1,343 @@
+- name: Deploy and initialize Elasticsearch cluster with self-signed certificates
+  hosts: es_nodes
+  become: true
+  vars:
+    es_version: "8.10.0"
+    es_cluster_name: "my-elastic-cluster"
+    certificates_dir: "/etc/elasticsearch/certs"
+    ca_key: "{{ certificates_dir }}/ca.key"
+    ca_cert: "{{ certificates_dir }}/ca.crt"
+    node_key: "{{ certificates_dir }}/node.key"
+    node_cert: "{{ certificates_dir }}/node.crt"
+    ca_node: "{{ groups['es_nodes'][0] }}"
+    discovery_seed_hosts: "{{ groups['es_nodes'] | map('extract', hostvars, ['ansible_default_ipv4','address']) | list }}"
+    initial_master_nodes: "{{ groups['es_nodes'] | map('extract', hostvars, ['ansible_default_ipv4','address']) | list }}"
+    es_jvm_options:
+      - "-Xms1g"
+      - "-Xmx1g"
+    es_users:
+      elastic: "{{ vault_elastic_password | default('change') }}"
+      kibana_system: "{{ vault_kibana_password | default('change') }}"
+    es_initial_run: true
+
+  tasks:
+    - name: Add Elastic GPG key (Debian)
+      ansible.builtin.apt_key:
+        url: https://artifacts.elastic.co/GPG-KEY-elasticsearch
+        state: present
+      when: ansible_os_family == 'Debian'
+
+    - name: Add Elastic repository (Debian)
+      ansible.builtin.apt_repository:
+        repo: deb https://artifacts.elastic.co/packages/{{ es_version.split('.')[0] }}.x/apt stable main
+        state: present
+      when: ansible_os_family == 'Debian'
+
+    - name: Add Elastic repository (RedHat)
+      ansible.builtin.yum_repository:
+        name: elasticsearch
+        description: Elastic repository for {{ es_version }}
+        baseurl: https://artifacts.elastic.co/packages/{{ es_version.split('.')[0] }}.x/yum
+        gpgcheck: yes
+        gpgkey: https://artifacts.elastic.co/GPG-KEY-elasticsearch
+        sslverify: yes
+        sslcacert: /etc/pki/tls/certs/ca-bundle.crt
+      when: ansible_os_family == 'RedHat'
+
+    - name: Install Elasticsearch
+      ansible.builtin.package:
+        name: elasticsearch
+        state: present
+
+    - name: Install python3-pip package
+      ansible.builtin.package:
+        name: python3-pip
+        state: present
+      register: pip_install
+      retries: 3
+      delay: 5
+      until: pip_install is success
+      when: ansible_os_family in ["Debian", "RedHat"]
+
+    - name: Install compatible elasticsearch Python library using pip
+      ansible.builtin.pip:
+        name: "elasticsearch>=8.0.0,<9.0.0"
+        state: present
+        executable: pip3
+      register: elasticsearch_install
+      retries: 3
+      delay: 5
+      until: elasticsearch_install is success
+
+    - name: Create certificates directory
+      ansible.builtin.file:
+        path: "{{ certificates_dir }}"
+        state: directory
+        mode: '0750'
+        owner: elasticsearch
+        group: elasticsearch
+      become: true
+
+    - name: Generate CA private key
+      community.crypto.openssl_privatekey:
+        path: "{{ ca_key }}"
+        owner: elasticsearch
+        group: elasticsearch
+        mode: '0600'
+      become: true
+      delegate_to: "{{ ca_node }}"
+
+    - name: Generate CA CSR with extensions
+      community.crypto.openssl_csr:
+        path: "{{ certificates_dir }}/ca.csr"
+        privatekey_path: "{{ ca_key }}"
+        subject:
+          commonName: "my-elastic-cluster CA"
+        basic_constraints: "CA:TRUE,pathlen:0"
+        key_usage:
+          - keyCertSign
+          - cRLSign
+        owner: elasticsearch
+        group: elasticsearch
+        mode: '0644'
+      become: true
+      delegate_to: "{{ ca_node }}"
+
+    - name: Generate self-signed CA certificate from CSR
+      community.crypto.x509_certificate:
+        path: "{{ ca_cert }}"
+        privatekey_path: "{{ ca_key }}"
+        csr_path: "{{ certificates_dir }}/ca.csr"
+        provider: selfsigned
+        owner: elasticsearch
+        group: elasticsearch
+        mode: '0644'
+      become: true
+      delegate_to: "{{ ca_node }}"
+
+    - name: Remove CA CSR (optional cleanup)
+      ansible.builtin.file:
+        path: "{{ certificates_dir }}/ca.csr"
+        state: absent
+      become: true
+      delegate_to: "{{ ca_node }}"
+
+    - name: Fetch CA certificate to control node
+      ansible.builtin.fetch:
+        src: "{{ ca_cert }}"
+        dest: "/tmp/ca.crt"
+        flat: yes
+      delegate_to: "{{ ca_node }}"
+
+    - name: Distribute CA certificate to all nodes
+      ansible.builtin.copy:
+        src: "/tmp/ca.crt"
+        dest: "{{ ca_cert }}"
+        mode: '0640'
+        owner: elasticsearch
+        group: elasticsearch
+      become: true
+
+    - name: Generate node private key
+      community.crypto.openssl_privatekey:
+        path: "{{ node_key }}"
+        owner: elasticsearch
+        group: elasticsearch
+        mode: '0600'
+      become: true
+
+    - name: Generate node CSR
+      community.crypto.openssl_csr:
+        path: "{{ certificates_dir }}/{{ inventory_hostname }}.csr"
+        privatekey_path: "{{ node_key }}"
+        subject:
+          commonName: "{{ es_node_name }}"
+        subject_alt_name: "IP:{{ inventory_hostname }}"
+        # subject_alt_name: "DNS:{{ inventory_hostname }},IP:{{ ansible_default_ipv4.address }}" This is good way to do so but on-prem :(
+        owner: elasticsearch
+        group: elasticsearch
+        mode: '0644'
+      become: true
+
+    # Збереження CSR з вузлів на керуючу машину
+    - name: Fetch CSR from each node to control node
+      ansible.builtin.fetch:
+        src: "{{ certificates_dir }}/{{ inventory_hostname }}.csr"
+        dest: "/tmp/csrs/"
+        flat: yes
+      become: true
+
+    # Копіювання CSR з керуючої машини на ca_node
+    - name: Copy CSR to ca_node
+      ansible.builtin.copy:
+        src: "/tmp/csrs/{{ item }}.csr"
+        dest: "/tmp/{{ item }}.csr"
+      delegate_to: "{{ ca_node }}"
+      loop: "{{ groups['es_nodes'] }}"
+
+    - name: Sign CSRs on ca_node
+      community.crypto.x509_certificate:
+        path: "/tmp/{{ item }}.crt"
+        csr_path: "/tmp/{{ item }}.csr"
+        provider: ownca
+        ownca_path: "{{ ca_cert }}"
+        ownca_privatekey_path: "{{ ca_key }}"
+        ownca_not_after: +365d
+        ownca_not_before: "-1d"
+        owner: elasticsearch
+        group: elasticsearch
+        mode: '0644'
+      become: true
+      delegate_to: "{{ ca_node }}"
+      loop: "{{ groups['es_nodes'] }}"
+
+    - name: Fetch signed certificates to control node
+      ansible.builtin.fetch:
+        src: "/tmp/{{ item }}.crt"
+        dest: "/tmp/{{ item }}.crt"
+        flat: yes
+      delegate_to: "{{ ca_node }}"
+      loop: "{{ groups['es_nodes'] }}"
+
+    - name: Distribute signed certificates to each node
+      ansible.builtin.copy:
+        src: "/tmp/{{ inventory_hostname }}.crt"
+        dest: "{{ node_cert }}"
+        mode: '0640'
+        owner: elasticsearch
+        group: elasticsearch
+      become: true
+
+    - name: Set JVM options
+      ansible.builtin.lineinfile:
+        path: /etc/elasticsearch/jvm.options
+        line: "{{ item }}"
+        state: present
+      loop: "{{ es_jvm_options }}"
+      become: true
+
+    - name: Configure Elasticsearch
+      ansible.builtin.template:
+        src: templates/elasticsearch.yml.j2
+        dest: /etc/elasticsearch/elasticsearch.yml
+        mode: '0644'
+        owner: elasticsearch
+        group: elasticsearch
+      become: true
+
+    - name: Create the elasticsearch keystore if it does not exist
+      become: yes
+      command: >
+        /usr/share/elasticsearch/bin/elasticsearch-keystore create
+      args:
+        creates: /etc/elasticsearch/elasticsearch.keystore
+      environment:
+        ES_PATH_CONF: /etc/elasticsearch
+
+    - name: Check if bootstrap.password is already set in keystore
+      become: yes
+      command: >
+        /usr/share/elasticsearch/bin/elasticsearch-keystore list
+      register: keystore_list
+      changed_when: false
+      environment:
+        ES_PATH_CONF: /etc/elasticsearch
+
+    - name: Set bootstrap.password in keystore if not set
+      become: yes
+      shell: echo "{{ es_users.elastic }}" | /usr/share/elasticsearch/bin/elasticsearch-keystore add --force -x 'bootstrap.password'
+      when: "'bootstrap.password' not in keystore_list.stdout_lines"
+
+    - name: Ensure /usr/share/elasticsearch ownership is elasticsearch:elasticsearch
+      ansible.builtin.file:
+        path: /usr/share/elasticsearch
+        owner: elasticsearch
+        group: elasticsearch
+        recurse: yes
+
+    - name: Open Elasticsearch ports in firewalld
+      ansible.builtin.command: >
+        firewall-cmd --permanent --add-port={{ item }}/tcp
+      loop:
+        - 9200
+        - 9300
+
+    - name: Reload firewalld
+      ansible.builtin.command: firewall-cmd --reload
+      become: true
+
+    - name: Start Elasticsearch service
+      ansible.builtin.systemd:
+        name: elasticsearch
+        state: started
+        enabled: yes
+      become: true
+
+    - name: Verify Elasticsearch is ready
+      ansible.builtin.uri:
+        url: "https://{{ inventory_hostname }}:9200/_cluster/health?pretty"
+        method: GET
+        validate_certs: false  # Self-signed certificates
+        user: elastic
+        password: "{{ es_users.elastic }}"
+        force_basic_auth: yes
+        status_code: 200
+      register: es_health
+      until: es_health.status == 200 and es_health.json.status in ['green', 'yellow']
+      retries: 30  # Retry up to 30 times
+      delay: 10    # Wait 10 seconds between retries
+      when: inventory_hostname == ca_node and es_initial_run
+
+
+    - name: Change kibana user password via API
+      ansible.builtin.uri:
+        url: "https://{{ inventory_hostname }}:9200/_security/user/kibana_system/_password"
+        method: POST
+        validate_certs: false # Self-signed moment :)
+        user: elastic
+        password: "{{ es_users.elastic }}"
+        force_basic_auth: yes
+        body: '{"password": "{{ es_users.kibana_system }}"}'
+        body_format: json
+      register: result
+      until: result.status == 200
+      retries: 5
+      delay: 2
+
+
+    - name: Wait for cluster health to stabilize
+      ansible.builtin.uri:
+        url: "https://{{ inventory_hostname }}:9200/_cluster/health?pretty"
+        method: GET
+        validate_certs: false # Self-signed moment :)
+        user: elastic
+        password: "{{ es_users.elastic }}"
+        force_basic_auth: yes
+        status_code: 200
+      register: es_health
+      until: es_health.json.status in ['yellow', 'green']
+      retries: 15
+      delay: 10
+      when: inventory_hostname == ca_node and es_initial_run
+
+  handlers:
+    - name: Restart Elasticsearch
+      ansible.builtin.systemd:
+        name: elasticsearch
+        state: restarted
+        enabled: yes
+      become: true
+
+  post_tasks:
+    - name: Flush handlers
+      ansible.builtin.meta: flush_handlers
+
+    - name: Display cluster initialization info
+      ansible.builtin.debug:
+        msg: |
+          Elasticsearch cluster deployed!
+          Initial credentials:
+            elastic: {{ es_users.elastic }}
+            kibana_system: {{ es_users.kibana_system }}
+      when: inventory_hostname == ca_node and es_initial_run
+      run_once: true
