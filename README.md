@@ -260,24 +260,4 @@ ansible-playbook -i inventory playbooks/deploy.yml --limit test_group
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
-## 🙏 Acknowledgments
-
-- **Elastic Stack Team** for the amazing ELK components
-- **Ansible Community** for automation excellence  
-- **Nginx Team** for the robust reverse proxy
-- **Contributors** who helped improve this project
-
-## 📞 Support
-
-- 📖 **Documentation**: [DEPLOYMENT.md](DEPLOYMENT.md)
-- 🐛 **Issues**: [GitHub Issues](../../issues)
-- 💡 **Discussions**: [GitHub Discussions](../../discussions)
-- 📧 **Contact**: [maintainer@example.com](mailto:maintainer@example.com)
-
----
-
-**⭐ Star this repository if it helped you!**
-
-*Made with ❤️ by the DevOps community*
-
 
