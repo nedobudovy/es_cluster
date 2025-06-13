@@ -255,9 +255,3 @@ ansible-playbook -i inventory playbooks/deploy.yml --check
 # Limited scope testing
 ansible-playbook -i inventory playbooks/deploy.yml --limit test_group
 ```
-
-## 📄 License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-
