@@ -1,5 +1,5 @@
 ---
-- name: Deploy Elastcsearch
+- name: Deploy Elasticsearch
   hosts: es_nodes
   become: yes
   roles:

@@ -1,0 +1,166 @@
+---
+- name: Install nginx
+  ansible.builtin.dnf:
+    name: nginx
+    state: present
+  become: true
+
+- name: Install openssl for certificate generation
+  ansible.builtin.dnf:
+    name: openssl
+    state: present
+  become: true
+
+- name: Create nginx SSL directory
+  ansible.builtin.file:
+    path: /etc/nginx/ssl
+    state: directory
+    mode: '0750'
+    owner: root
+    group: nginx
+  become: true
+
+- name: Generate private key for nginx SSL
+  ansible.builtin.command: >
+    openssl genrsa -out /etc/nginx/ssl/nginx.key 2048
+  args:
+    creates: /etc/nginx/ssl/nginx.key
+  become: true
+
+- name: Set permissions for nginx private key
+  ansible.builtin.file:
+    path: /etc/nginx/ssl/nginx.key
+    owner: root
+    group: nginx
+    mode: '0640'
+  become: true
+
+- name: Create certificate extensions file for nginx
+  ansible.builtin.copy:
+    content: |
+      [req]
+      distinguished_name = req_distinguished_name
+      req_extensions = v3_req
+      prompt = no
+      
+      [req_distinguished_name]
+      C = US
+      ST = State
+      L = City
+      O = Organization
+      OU = OrgUnit
+      CN = {{ ansible_hostname }}
+      
+      [v3_req]
+      keyUsage = keyEncipherment, dataEncipherment
+      extendedKeyUsage = serverAuth
+      subjectAltName = @alt_names
+      
+      [alt_names]
+      DNS.1 = {{ ansible_hostname }}
+      DNS.2 = localhost
+      DNS.3 = nginx-proxy
+      IP.1 = {{ ansible_default_ipv4.address }}
+      IP.2 = 127.0.0.1
+      IP.3 = 192.168.56.98
+    dest: /etc/nginx/ssl/nginx.conf
+    mode: '0644'
+    owner: root
+    group: nginx
+  become: true
+
+- name: Generate self-signed certificate for nginx
+  ansible.builtin.command: >
+    openssl req -new -x509 -key /etc/nginx/ssl/nginx.key 
+    -out /etc/nginx/ssl/nginx.crt 
+    -days 365 
+    -config /etc/nginx/ssl/nginx.conf
+    -extensions v3_req
+  args:
+    creates: /etc/nginx/ssl/nginx.crt
+  become: true
+
+- name: Set permissions for nginx certificate
+  ansible.builtin.file:
+    path: /etc/nginx/ssl/nginx.crt
+    owner: root
+    group: nginx
+    mode: '0644'
+  become: true
+
+- name: Remove nginx certificate config file
+  ansible.builtin.file:
+    path: /etc/nginx/ssl/nginx.conf
+    state: absent
+  become: true
+
+- name: Verify SSL certificate was created
+  ansible.builtin.command: openssl x509 -in /etc/nginx/ssl/nginx.crt -text -noout
+  register: cert_check
+  become: true
+
+- name: Display certificate info
+  ansible.builtin.debug:
+    msg: "SSL certificate created successfully"
+  when: cert_check.rc == 0
+
+- name: Configure nginx main config
+  ansible.builtin.template:
+    src: nginx.conf.j2
+    dest: /etc/nginx/nginx.conf
+    backup: true
+    mode: '0644'
+    owner: root
+    group: root
+  become: true
+  notify: restart nginx
+
+- name: Configure nginx reverse proxy for Kibana
+  ansible.builtin.template:
+    src: kibana-proxy.conf.j2
+    dest: /etc/nginx/conf.d/kibana-proxy.conf
+    mode: '0644'
+    owner: root
+    group: root
+  become: true
+  notify: restart nginx
+
+- name: Open HTTP port in firewalld
+  ansible.builtin.firewalld:
+    port: 80/tcp
+    permanent: true
+    state: enabled
+    immediate: true
+  become: true
+
+- name: Open HTTPS port in firewalld
+  ansible.builtin.firewalld:
+    port: 443/tcp
+    permanent: true
+    state: enabled
+    immediate: true
+  become: true
+
+- name: Allow nginx to connect to network (SELinux)
+  ansible.builtin.seboolean:
+    name: httpd_can_network_connect
+    state: yes
+    persistent: yes
+  become: true
+
+- name: Test nginx configuration
+  ansible.builtin.command: nginx -t
+  become: true
+  register: nginx_test
+
+- name: Display nginx test result
+  ansible.builtin.debug:
+    msg: "Nginx configuration test: {{ 'PASSED' if nginx_test.rc == 0 else 'FAILED' }}"
+
+- name: Start and enable nginx service
+  ansible.builtin.systemd:
+    name: nginx
+    state: started
+    enabled: true
+  become: true
+  when: nginx_test.rc == 0 

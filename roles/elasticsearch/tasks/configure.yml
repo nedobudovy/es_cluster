@@ -94,3 +94,11 @@
   until: result.status == 200
   retries: 5
   delay: 2
+  when: not use_api_key_auth | default(true)
+
+- name: Include API key setup tasks
+  ansible.builtin.include_tasks: api_key_setup.yml
+  when: 
+    - inventory_hostname == ca_node
+    - es_initial_run
+    - use_api_key_auth | default(true)

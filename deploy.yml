@@ -1,0 +1,28 @@
+---
+# ============================================================================
+# ELK Stack Single-File Deployment - Root Level Wrapper
+# ============================================================================
+# This is a convenience wrapper that executes the main deployment playbook
+# For the complete single-file deployment, see: playbooks/deploy.yml
+# ============================================================================
+
+- name: Execute ELK Stack Deployment
+  import_playbook: playbooks/deploy.yml
+
+# ============================================================================
+# Usage Examples:
+# ============================================================================
+# 
+# 1. Standard deployment with username/password auth:
+#    ansible-playbook -i inventory deploy.yml
+#
+# 2. Deployment with API key authentication:
+#    ansible-playbook -i inventory deploy.yml -e use_api_key_auth=true
+#
+# 3. Development mode deployment:
+#    ansible-playbook -i inventory deploy.yml -e deployment_mode=development
+#
+# 4. Disable monitoring:
+#    ansible-playbook -i inventory deploy.yml -e enable_monitoring=false
+#
+# ============================================================================ 

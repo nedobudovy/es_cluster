@@ -1,0 +1,90 @@
+---
+- name: Setup API Key Authentication for Kibana
+  hosts: es_nodes
+  become: yes
+  gather_facts: true
+  vars:
+    es_self_signed_certs: true
+    use_api_key_auth: true
+    ca_node: "{{ groups['es_nodes'][0] }}"
+    es_initial_run: true
+    es_users:
+      elastic: "{{ vault_elastic_password | default('change') }}"
+      kibana_system: "{{ vault_kibana_password | default('change') }}"
+  
+  tasks:
+    - name: Verify Elasticsearch is running
+      ansible.builtin.systemd:
+        name: elasticsearch
+        state: started
+      
+    - name: Wait for Elasticsearch to be ready
+      ansible.builtin.uri:
+        url: "https://{{ inventory_hostname }}:9200/_cluster/health"
+        method: GET
+        validate_certs: "{{ false if es_self_signed_certs else true }}"
+        user: elastic
+        password: "{{ es_users.elastic }}"
+        force_basic_auth: yes
+        status_code: 200
+      register: es_health
+      until: es_health.status == 200
+      retries: 30
+      delay: 10
+      when: inventory_hostname == groups['es_nodes'][0]
+      
+    - name: Include API key setup tasks
+      ansible.builtin.include_tasks: ../roles/elasticsearch/tasks/api_key_setup.yml
+      when: inventory_hostname == groups['es_nodes'][0]
+
+- name: Configure Kibana with API Key Authentication
+  hosts: kibana
+  become: yes
+  gather_facts: true
+  vars:
+    es_self_signed_certs: true
+    use_api_key_auth: true
+    elasticsearch_username: "kibana_system"
+    elasticsearch_password: "change"
+    kibana_port: 5601
+    certificates_dir_kibana: "/etc/kibana/certs"
+    ca_cert_kibana: "{{ certificates_dir_kibana }}/ca.crt"
+    elasticsearch_hosts: >-
+      {{ groups['es_nodes'] | map('regex_replace', '^', 'https://') | 
+         map('regex_replace', '$', ':9200') | list }}
+  
+  tasks:
+    - name: Include API key configuration tasks
+      ansible.builtin.include_tasks: ../roles/kibana/tasks/api_key_config.yml
+      
+    - name: Configure Kibana with API key
+      ansible.builtin.template:
+        src: ../roles/kibana/templates/kibana.yml.j2
+        dest: /etc/kibana/kibana.yml
+        mode: '0644'
+        owner: kibana
+        group: kibana
+      
+    - name: Restart Kibana service
+      ansible.builtin.systemd:
+        name: kibana
+        state: restarted
+        
+    - name: Wait for Kibana to be ready
+      ansible.builtin.uri:
+        url: "https://{{ inventory_hostname }}:5601/api/status"
+        method: GET
+        validate_certs: false
+        status_code: [200, 401]
+      register: kibana_status
+      until: kibana_status.status in [200, 401]
+      retries: 30
+      delay: 10
+      
+    - name: Display success message
+      ansible.builtin.debug:
+        msg:
+          - "✅ API key authentication setup completed!"
+          - "🔑 Kibana is now using API key instead of username/password"
+          - "🌐 Access Kibana: https://{{ inventory_hostname }}:5601"
+          - "🔒 Via Nginx: https://localhost:8443" 

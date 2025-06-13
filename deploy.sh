@@ -26,9 +26,6 @@ echo "All tools are installed successfully"
 # Generating key for access to the VM's and for ansible
 ssh-keygen -q -t rsa -b 4096 -f ~/.ssh/es_cluster -N ""
 
-# Installing the dependencies
-pip install elasticsearch
-
 # Starting this bad boy (Vagrant)
 vagrant up
 

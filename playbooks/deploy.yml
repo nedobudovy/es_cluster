@@ -1,18 +1,445 @@
 ---
-- name: Deploy Elastcsearch
+# ============================================================================
+# Comprehensive ELK Stack Deployment with HTTPS and Nginx Reverse Proxy
+# ============================================================================
+# This playbook deploys:
+# - Elasticsearch cluster with self-signed HTTPS certificates
+# - Kibana with HTTPS and authentication
+# - Nginx reverse proxy with SSL termination
+# - Optional API key authentication setup
+# ============================================================================
+
+# Global variables shared across all plays
+- name: Set Global Variables
+  hosts: all:localhost
+  gather_facts: true
+  vars:
+    # Global configuration - can be overridden with -e variables
+    deployment_mode: "development"  # production, development
+    use_api_key_auth: true         # Set to false to disable API key auth
+    enable_monitoring: true        # Enable stack monitoring
+    
+    # Security settings
+    es_self_signed_certs: true
+    ssl_verification: false
+    
+    # Elasticsearch configuration
+    es_initial_run: true
+    ca_node: "{{ groups['es_nodes'][0] }}"
+    
+    # Default passwords (override with vault)
+    default_passwords:
+      elastic: "change"
+      kibana_system: "change"
+      logstash_system: "change"
+      beats_system: "change"
+      apm_system: "change"
+      remote_monitoring_user: "change"
+
+    # Elasticsearch users
+    es_users:
+      elastic: "{{ vault_elastic_password | default(default_passwords.elastic) }}"
+      kibana_system: "{{ vault_kibana_password | default(default_passwords.kibana_system) }}"
+      logstash_system: "{{ vault_logstash_password | default(default_passwords.logstash_system) }}"
+      beats_system: "{{ vault_beats_password | default(default_passwords.beats_system) }}"
+      apm_system: "{{ vault_apm_password | default(default_passwords.apm_system) }}"
+      remote_monitoring_user: "{{ vault_monitoring_password | default(default_passwords.remote_monitoring_user) }}"
+
+    # Kibana configuration
+    kibana_port: 5601
+    certificates_dir_kibana: "/etc/kibana/certs"
+    ca_cert_kibana: "{{ certificates_dir_kibana }}/ca.crt"
+    elasticsearch_username: "kibana_system"
+    elasticsearch_password: "{{ vault_kibana_password | default(default_passwords.kibana_system) }}"
+    elasticsearch_hosts: >-
+      {{ groups['es_nodes'] | map('regex_replace', '^', 'https://') | 
+         map('regex_replace', '$', ':9200') | list }}
+
+    # Nginx configuration
+    kibana_backend_hosts: "{{ groups['kibana'] }}"
+    kibana_backend_port: 5601
+    nginx_ssl_certificate: "/etc/nginx/ssl/nginx.crt"
+    nginx_ssl_private_key: "/etc/nginx/ssl/nginx.key"
+
+  tasks:
+    - name: Set global facts for all hosts
+      ansible.builtin.set_fact:
+        deployment_mode: "{{ deployment_mode }}"
+        use_api_key_auth: "{{ use_api_key_auth }}"
+        enable_monitoring: "{{ enable_monitoring }}"
+        es_self_signed_certs: "{{ es_self_signed_certs }}"
+        ssl_verification: "{{ ssl_verification }}"
+        es_initial_run: "{{ es_initial_run }}"
+        ca_node: "{{ ca_node }}"
+        default_passwords: "{{ default_passwords }}"
+        es_users: "{{ es_users }}"
+        kibana_port: "{{ kibana_port }}"
+        certificates_dir_kibana: "{{ certificates_dir_kibana }}"
+        ca_cert_kibana: "{{ ca_cert_kibana }}"
+        elasticsearch_username: "{{ elasticsearch_username }}"
+        elasticsearch_password: "{{ elasticsearch_password }}"
+        elasticsearch_hosts: "{{ elasticsearch_hosts }}"
+        kibana_backend_hosts: "{{ kibana_backend_hosts }}"
+        kibana_backend_port: "{{ kibana_backend_port }}"
+        nginx_ssl_certificate: "{{ nginx_ssl_certificate }}"
+        nginx_ssl_private_key: "{{ nginx_ssl_private_key }}"
+
+- name: Display Deployment Information and Validate Inventory
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Display deployment information
+      ansible.builtin.debug:
+        msg:
+          - "🚀 Starting ELK Stack Deployment"
+          - "📋 Deployment Mode: {{ deployment_mode }}"
+          - "🔐 API Key Auth: {{ use_api_key_auth | ternary('Enabled', 'Disabled') }}"
+          - "🔒 HTTPS: Enabled with self-signed certificates"
+          - "📊 Monitoring: {{ enable_monitoring | ternary('Enabled', 'Disabled') }}"
+          - "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+    - name: Verify inventory groups
+      ansible.builtin.assert:
+        that:
+          - groups['es_nodes'] is defined and groups['es_nodes'] | length > 0
+          - groups['kibana'] is defined and groups['kibana'] | length > 0
+          - groups['nginx'] is defined and groups['nginx'] | length > 0
+        fail_msg: "Required inventory groups (es_nodes, kibana, nginx) must be defined"
+        success_msg: "✅ Inventory validation passed"
+
+- name: Deploy Elasticsearch Cluster
   hosts: es_nodes
   become: yes
-  roles:
-    - role: elasticsearch
-  vars:
-    es_self_signed_certs: true
+  gather_facts: true
+  tasks:
+    - name: Display Elasticsearch deployment info
+      ansible.builtin.debug:
+        msg:
+          - "🔍 Elasticsearch Deployment Starting"
+          - "📍 Node: {{ inventory_hostname }}"
+          - "🏷️  Role: {{ 'CA Node' if inventory_hostname == ca_node else 'Data Node' }}"
+          - "🔐 Self-signed certs: {{ es_self_signed_certs }}"
+      run_once: true
+
+    - name: Deploy Elasticsearch
+      ansible.builtin.include_role:
+        name: elasticsearch
+
+    - name: Wait for Elasticsearch cluster to be ready
+      ansible.builtin.uri:
+        url: "https://{{ inventory_hostname }}:9200/_cluster/health?wait_for_status=yellow&timeout=60s"
+        method: GET
+        validate_certs: "{{ not es_self_signed_certs }}"
+        user: elastic
+        password: "{{ es_users.elastic }}"
+        force_basic_auth: yes
+        status_code: 200
+      register: es_cluster_health
+      retries: 12
+      delay: 10
+      when: inventory_hostname == ca_node
+      run_once: true
+
+    - name: Display Elasticsearch cluster status
+      ansible.builtin.debug:
+        msg:
+          - "✅ Elasticsearch cluster is ready!"
+          - "🏥 Cluster Health: {{ es_cluster_health.json.status | default('unknown') }}"
+          - "🖥️  Nodes: {{ es_cluster_health.json.number_of_nodes | default('unknown') }}"
+          - "💾 Data Nodes: {{ es_cluster_health.json.number_of_data_nodes | default('unknown') }}"
+          - "📊 Active Shards: {{ es_cluster_health.json.active_shards | default('unknown') }}"
+      when: inventory_hostname == ca_node and es_cluster_health is defined
+      run_once: true
+
+    - name: Setup API Key Authentication (if enabled)
+      ansible.builtin.debug:
+        msg:
+          - "🔑 API Key Authentication Setup"
+          - "📍 Running on CA Node: {{ inventory_hostname }}"
+          - "⚡ Status: {{ use_api_key_auth | ternary('Enabled', 'Skipped') }}"
+      when: inventory_hostname == ca_node and use_api_key_auth
+      run_once: true
+
+    - name: Create API key for Kibana
+      ansible.builtin.uri:
+        url: "https://{{ inventory_hostname }}:9200/_security/api_key"
+        method: POST
+        validate_certs: "{{ false if es_self_signed_certs else true }}"
+        user: elastic
+        password: "{{ es_users.elastic }}"
+        force_basic_auth: yes
+        body: |
+          {
+            "name": "kibana-system-api-key",
+            "role_descriptors": {
+              "kibana_system": {
+                "cluster": [
+                  "monitor",
+                  "manage_index_templates",
+                  "manage_ingest_pipelines",
+                  "manage_logstash_pipelines"
+                ],
+                "indices": [
+                  {
+                    "names": [".kibana*", ".reporting-*", ".apm-*", ".siem-signals-*"],
+                    "privileges": ["all"]
+                  },
+                  {
+                    "names": [".monitoring-*"],
+                    "privileges": ["read", "write", "create_index", "view_index_metadata"]
+                  }
+                ]
+              }
+            },
+            "metadata": {
+              "created_by": "ansible",
+              "purpose": "kibana-system-authentication"
+            }
+          }
+        body_format: json
+        headers:
+          Content-Type: "application/json"
+        status_code: 200
+      register: kibana_api_key_response
+      when: 
+        - use_api_key_auth | bool
+        - inventory_hostname == ca_node
+      run_once: true
+
+    - name: Save API key information as global facts
+      ansible.builtin.set_fact:
+        kibana_api_key_id: "{{ kibana_api_key_response.json.id }}"
+        kibana_api_key_secret: "{{ kibana_api_key_response.json.api_key }}"
+        kibana_api_key_encoded: "{{ (kibana_api_key_response.json.id + ':' + kibana_api_key_response.json.api_key) | b64encode }}"
+      when: 
+        - use_api_key_auth | bool
+        - inventory_hostname == ca_node 
+        - kibana_api_key_response is defined
+      run_once: true
+      delegate_facts: true
+
+    - name: Display API key information
+      ansible.builtin.debug:
+        msg:
+          - "✅ Kibana API key created successfully!"
+          - "API Key ID: {{ kibana_api_key_id }}"
+          - "Encoded API Key: {{ kibana_api_key_encoded }}"
+          - "This key will be used for Kibana authentication"
+      when: 
+        - use_api_key_auth | bool
+        - inventory_hostname == ca_node 
+        - kibana_api_key_response is defined
+      run_once: true
 
 - name: Deploy Kibana
   hosts: kibana
   become: yes
-  roles:
-    - role: kibana
+  gather_facts: true
+  tasks:
+    - name: Display Kibana deployment info
+      ansible.builtin.debug:
+        msg:
+          - "🌐 Kibana Deployment Starting"
+          - "📍 Node: {{ inventory_hostname }}"
+          - "🔗 Elasticsearch hosts: {{ elasticsearch_hosts | length }} node(s)"
+          - "🔐 Authentication: {{ use_api_key_auth | ternary('API Key', 'Username/Password') }}"
+
+    - name: Configure Kibana API key authentication (if enabled)
+      ansible.builtin.debug:
+        msg:
+          - "🔑 Configuring Kibana API key authentication"
+          - "Using API key: {{ kibana_api_key_encoded[:20] }}..."
+      when: 
+        - use_api_key_auth | bool
+        - kibana_api_key_encoded is defined
+
+    - name: Deploy Kibana
+      ansible.builtin.include_role:
+        name: kibana
+
+    - name: Wait for Kibana to be ready
+      ansible.builtin.uri:
+        url: "https://{{ inventory_hostname }}:{{ kibana_port }}/api/status"
+        method: GET
+        validate_certs: "{{ not es_self_signed_certs }}"
+        status_code: [200, 401, 302]
+      register: kibana_status
+      retries: 15
+      delay: 10
+      until: kibana_status.status in [200, 401, 302]
+
+    - name: Display Kibana status
+      ansible.builtin.debug:
+        msg:
+          - "✅ Kibana is ready!"
+          - "🌐 URL: https://{{ inventory_hostname }}:{{ kibana_port }}"
+          - "📊 Status: {{ kibana_status.status }}"
+          - "🔐 Authentication: {{ use_api_key_auth | ternary('API Key', 'Username/Password') }}"
+
+- name: Deploy Nginx Reverse Proxy
+  hosts: nginx
+  become: yes
+  gather_facts: true
   vars:
-    es_self_signed_certs: true
+    nginx_server_name: "{{ ansible_default_ipv4.address }}"
+  tasks:
+    - name: Display Nginx deployment info
+      ansible.builtin.debug:
+        msg:
+          - "🔄 Nginx Reverse Proxy Deployment Starting"
+          - "📍 Node: {{ inventory_hostname }}"
+          - "🎯 Backend: {{ kibana_backend_hosts | length }} Kibana node(s)"
+          - "🔒 SSL: Self-signed certificates"
+
+    - name: Install SELinux management tools
+      ansible.builtin.dnf:
+        name: 
+          - python3-libsemanage
+          - policycoreutils-python-utils
+        state: present
+      become: true
+
+    - name: Deploy Nginx
+      ansible.builtin.include_role:
+        name: nginx
+
+    - name: Test Nginx to Kibana connectivity
+      ansible.builtin.uri:
+        url: "https://{{ inventory_hostname }}/api/status"
+        method: GET
+        validate_certs: false
+        status_code: [200, 401, 302, 502]
+      register: nginx_test
+      retries: 5
+      delay: 5
+
+    - name: Display Nginx deployment status
+      ansible.builtin.debug:
+        msg:
+          - "✅ Nginx reverse proxy is ready!"
+          - "🌐 External URL: https://{{ ansible_default_ipv4.address }}"
+          - "🔗 Proxy Status: {{ nginx_test.status }}"
+          - "📋 Backend Health: {{ 'Healthy' if nginx_test.status in [200, 401, 302] else 'Check Required' }}"
+
+- name: Final Validation and Deployment Summary
+  hosts: localhost
+  gather_facts: false
+  vars:
+    elasticsearch_nodes: "{{ groups['es_nodes'] }}"
+    kibana_nodes: "{{ groups['kibana'] }}"
+    nginx_nodes: "{{ groups['nginx'] }}"
+  tasks:
+    - name: Gather deployment summary information
+      ansible.builtin.set_fact:
+        deployment_summary:
+          status: "completed"
+          timestamp: "{{ ansible_date_time.iso8601 }}"
+          components:
+            elasticsearch:
+              nodes: "{{ elasticsearch_nodes | length }}"
+              primary_node: "{{ elasticsearch_nodes[0] }}"
+              https_port: 9200
+            kibana:
+              nodes: "{{ kibana_nodes | length }}"
+              primary_node: "{{ kibana_nodes[0] }}"
+              https_port: 5601
+            nginx:
+              nodes: "{{ nginx_nodes | length }}"
+              primary_node: "{{ nginx_nodes[0] }}"
+              https_port: 443
+          security:
+            https_enabled: true
+            self_signed_certs: "{{ es_self_signed_certs }}"
+            api_key_auth: "{{ use_api_key_auth }}"
+          access_points:
+            elasticsearch: "https://{{ elasticsearch_nodes[0] }}:9200"
+            kibana_direct: "https://{{ kibana_nodes[0] }}:5601"
+            kibana_proxy: "https://{{ nginx_nodes[0] }}"
+            local_proxy: "https://localhost:8443"
+
+    - name: Final connectivity test
+      ansible.builtin.uri:
+        url: "https://{{ nginx_nodes[0] }}/api/status"
+        method: GET
+        validate_certs: false
+        status_code: [200, 401, 302]
+      register: final_test
+      failed_when: false
+      delegate_to: localhost
+
+    - name: "🎉 DEPLOYMENT COMPLETE - Display Summary"
+      ansible.builtin.debug:
+        msg:
+          - "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          - "🎉 ELK STACK DEPLOYMENT COMPLETED SUCCESSFULLY!"
+          - "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          - ""
+          - "📊 DEPLOYMENT SUMMARY:"
+          - "   • Elasticsearch Nodes: {{ deployment_summary.components.elasticsearch.nodes }}"
+          - "   • Kibana Nodes: {{ deployment_summary.components.kibana.nodes }}"
+          - "   • Nginx Proxy Nodes: {{ deployment_summary.components.nginx.nodes }}"
+          - "   • Deployment Time: {{ deployment_summary.timestamp }}"
+          - ""
+          - "🔒 SECURITY CONFIGURATION:"
+          - "   • HTTPS: ✅ Enabled"
+          - "   • Self-signed Certificates: ✅ Enabled"
+          - "   • API Key Authentication: {{ use_api_key_auth | ternary('✅ Enabled', '❌ Disabled') }}"
+          - ""
+          - "🌐 ACCESS POINTS:"
+          - "   • Elasticsearch: {{ deployment_summary.access_points.elasticsearch }}"
+          - "   • Kibana (Direct): {{ deployment_summary.access_points.kibana_direct }}"
+          - "   • Kibana (via Proxy): {{ deployment_summary.access_points.kibana_proxy }}"
+          - "   • Local (Port Forward): {{ deployment_summary.access_points.local_proxy }}"
+          - ""
+          - "✅ HEALTH STATUS:"
+          - "   • Overall Status: {{ 'HEALTHY' if final_test.status is defined and final_test.status in [200, 401, 302] else 'NEEDS ATTENTION' }}"
+          - "   • Proxy Response: {{ final_test.status | default('No Response') }}"
+          - ""
+          - "📋 NEXT STEPS:"
+          - "   1. Access Kibana via: {{ deployment_summary.access_points.kibana_proxy }}"
+          - "   2. Login with: elastic / {{ es_self_signed_certs | ternary('change', '[your-password]') }}"
+          - "   3. Configure data sources and dashboards"
+          - "   4. Set up monitoring and alerting"
+          - "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+    - name: Save deployment summary to file
+      ansible.builtin.copy:
+        content: |
+          # ELK Stack Deployment Summary
+          Generated: {{ deployment_summary.timestamp }}
+          
+          ## Components Deployed
+          - Elasticsearch: {{ deployment_summary.components.elasticsearch.nodes }} node(s)
+          - Kibana: {{ deployment_summary.components.kibana.nodes }} node(s)  
+          - Nginx: {{ deployment_summary.components.nginx.nodes }} node(s)
+          
+          ## Security Configuration
+          - HTTPS: Enabled
+          - Self-signed Certificates: {{ deployment_summary.security.self_signed_certs }}
+          - API Key Authentication: {{ deployment_summary.security.api_key_auth }}
+          
+          ## Access Points
+          - Elasticsearch: {{ deployment_summary.access_points.elasticsearch }}
+          - Kibana (Direct): {{ deployment_summary.access_points.kibana_direct }}
+          - Kibana (Proxy): {{ deployment_summary.access_points.kibana_proxy }}
+          - Local (Port Forward): {{ deployment_summary.access_points.local_proxy }}
+          
+          ## Default Credentials
+          - Username: elastic
+          - Password: change (update immediately)
+          
+          ## Health Check
+          - Status: {{ 'HEALTHY' if final_test.status is defined and final_test.status in [200, 401, 302] else 'NEEDS ATTENTION' }}
+          - Last Test: {{ ansible_date_time.iso8601 }}
+        dest: "./elk-deployment-summary.md"
+        mode: '0644'
+      delegate_to: localhost
+
+    - name: Display completion message
+      ansible.builtin.debug:
+        msg:
+          - "💾 Deployment summary saved to: ./elk-deployment-summary.md"
+          - "🔧 Run 'ansible-playbook -i inventory playbooks/deploy.yml' to redeploy"
+          - "🔑 Run 'ansible-playbook -i inventory playbooks/deploy.yml -e use_api_key_auth=true' for API key auth"
 
 

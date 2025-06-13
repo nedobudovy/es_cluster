@@ -1,6 +1,13 @@
-server.host: "{{ inventory_hostname }}"
-server.port: {{ kibana_port }} # Changed to more privacy or smth
+server.host: "0.0.0.0"
+server.port: {{ kibana_port }}
+
+# HTTPS Configuration
+server.ssl.enabled: true
+server.ssl.certificate: "{{ certificates_dir_kibana }}/kibana-server.crt"
+server.ssl.key: "{{ certificates_dir_kibana }}/kibana-server.key"
+
 elasticsearch.hosts: {{ elasticsearch_hosts | to_json }}
+# Username/Password Authentication
 elasticsearch.username: "{{ elasticsearch_username }}"
 elasticsearch.password: "{{ elasticsearch_password }}"
 elasticsearch.ssl.certificateAuthorities: ["{{ ca_cert_kibana }}"]

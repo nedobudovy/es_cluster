@@ -26,6 +26,69 @@
     owner: kibana
     group: kibana
 
+- name: Include API key configuration tasks
+  ansible.builtin.include_tasks: api_key_config.yml
+  when: use_api_key_auth | default(true)
+
+- name: Generate private key for Kibana HTTPS
+  ansible.builtin.command: >
+    openssl genrsa -out {{ certificates_dir_kibana }}/kibana-server.key 2048
+  args:
+    creates: "{{ certificates_dir_kibana }}/kibana-server.key"
+
+- name: Set ownership and permissions for Kibana private key
+  ansible.builtin.file:
+    path: "{{ certificates_dir_kibana }}/kibana-server.key"
+    owner: kibana
+    group: kibana
+    mode: '0600'
+
+- name: Generate certificate signing request for Kibana
+  ansible.builtin.command: >
+    openssl req -new -key {{ certificates_dir_kibana }}/kibana-server.key 
+    -out {{ certificates_dir_kibana }}/kibana-server.csr 
+    -subj "/C=US/ST=State/L=City/O=Organization/OU=OrgUnit/CN={{ inventory_hostname }}"
+  args:
+    creates: "{{ certificates_dir_kibana }}/kibana-server.csr"
+
+- name: Create certificate extensions file for Kibana
+  ansible.builtin.copy:
+    content: |
+      [v3_req]
+      subjectAltName=DNS:localhost,DNS:{{ inventory_hostname }},IP:{{ inventory_hostname }}
+    dest: "{{ certificates_dir_kibana }}/kibana-server.ext"
+    mode: '0644'
+    owner: kibana
+    group: kibana
+
+- name: Generate self-signed certificate for Kibana HTTPS
+  ansible.builtin.command: >
+    openssl x509 -req -in {{ certificates_dir_kibana }}/kibana-server.csr 
+    -signkey {{ certificates_dir_kibana }}/kibana-server.key 
+    -out {{ certificates_dir_kibana }}/kibana-server.crt 
+    -days 365 
+    -extensions v3_req 
+    -extfile {{ certificates_dir_kibana }}/kibana-server.ext
+  args:
+    creates: "{{ certificates_dir_kibana }}/kibana-server.crt"
+
+- name: Set ownership and permissions for Kibana certificate
+  ansible.builtin.file:
+    path: "{{ certificates_dir_kibana }}/kibana-server.crt"
+    owner: kibana
+    group: kibana
+    mode: '0644'
+
+- name: Remove certificate signing request file
+  ansible.builtin.file:
+    path: "{{ certificates_dir_kibana }}/kibana-server.csr"
+    state: absent
+
+- name: Remove certificate extensions file
+  ansible.builtin.file:
+    path: "{{ certificates_dir_kibana }}/kibana-server.ext"
+    state: absent
+
 - name: Open Kibana ports in firewalld
   ansible.builtin.command: >
     firewall-cmd --permanent --add-port={{ kibana_port }}/tcp
@@ -39,6 +102,8 @@
     owner: kibana
     group: kibana
   notify: restart kibana
+
+  
 
 - name: Ensure /usr/share/kibana ownership
   ansible.builtin.file:

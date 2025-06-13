@@ -1,0 +1,70 @@
+---
+- name: Create API key for Kibana
+  ansible.builtin.uri:
+    url: "https://{{ inventory_hostname }}:9200/_security/api_key"
+    method: POST
+    validate_certs: "{{ false if es_self_signed_certs else true }}"
+    user: elastic
+    password: "{{ es_users.elastic }}"
+    force_basic_auth: yes
+    body: |
+      {
+        "name": "kibana-system-api-key",
+        "role_descriptors": {
+          "kibana_system": {
+            "cluster": [
+              "monitor",
+              "manage_index_templates",
+              "manage_ingest_pipelines",
+              "manage_logstash_pipelines"
+            ],
+            "indices": [
+              {
+                "names": [".kibana*", ".reporting-*", ".apm-*", ".siem-signals-*"],
+                "privileges": ["all"]
+              },
+              {
+                "names": [".monitoring-*"],
+                "privileges": ["read", "write", "create_index", "view_index_metadata"]
+              }
+            ]
+          }
+        },
+        "metadata": {
+          "created_by": "ansible",
+          "purpose": "kibana-system-authentication"
+        }
+      }
+    body_format: json
+    headers:
+      Content-Type: "application/json"
+    status_code: 200
+  register: kibana_api_key_response
+  when: inventory_hostname == ca_node
+  run_once: true
+
+- name: Save API key information
+  ansible.builtin.set_fact:
+    kibana_api_key_id: "{{ kibana_api_key_response.json.id }}"
+    kibana_api_key_secret: "{{ kibana_api_key_response.json.api_key }}"
+    kibana_api_key_encoded: "{{ (kibana_api_key_response.json.id + ':' + kibana_api_key_response.json.api_key) | b64encode }}"
+  when: inventory_hostname == ca_node and kibana_api_key_response is defined
+  run_once: true
+
+- name: Store API key encoded value in temporary file
+  ansible.builtin.copy:
+    content: "{{ kibana_api_key_encoded }}"
+    dest: "/tmp/kibana_api_key"
+    mode: '0600'
+  when: inventory_hostname == ca_node and kibana_api_key_encoded is defined
+  run_once: true
+
+- name: Display API key information
+  ansible.builtin.debug:
+    msg:
+      - "✅ Kibana API key created successfully!"
+      - "API Key ID: {{ kibana_api_key_id }}"
+      - "Encoded API Key: {{ kibana_api_key_encoded }}"
+      - "This key will be used for Kibana authentication"
+  when: inventory_hostname == ca_node and kibana_api_key_response is defined
+  run_once: true 

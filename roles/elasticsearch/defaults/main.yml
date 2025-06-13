@@ -17,3 +17,4 @@ es_users:
   kibana_system: "{{ vault_kibana_password | default('change') }}"
 es_initial_run: true
 es_self_signed_certs: false
+use_api_key_auth: true  # Use API key authentication instead of username/password

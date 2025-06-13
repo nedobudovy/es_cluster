@@ -1,0 +1,21 @@
+---
+- name: Read API key content from Elasticsearch node
+  ansible.builtin.slurp:
+    src: "/tmp/kibana_api_key"
+  register: api_key_content
+  delegate_to: "{{ groups['es_nodes'][0] }}"
+  when: use_api_key_auth | default(true)
+
+- name: Set API key fact
+  ansible.builtin.set_fact:
+    kibana_api_key_encoded: "{{ api_key_content.content | b64decode }}"
+  when: 
+    - use_api_key_auth | default(true)
+    - api_key_content is defined
+
+- name: Clean up API key file on Elasticsearch node
+  ansible.builtin.file:
+    path: "/tmp/kibana_api_key"
+    state: absent
+  delegate_to: "{{ groups['es_nodes'][0] }}"
+  when: use_api_key_auth | default(true) 

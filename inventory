@@ -1,7 +1,10 @@
 [es_nodes]
 192.168.56.101 es_node_name=node1
-192.168.56.102 es_node_name=node2
-192.168.56.103 es_node_name=node3
+#192.168.56.102 es_node_name=node2 # Commented if testing for less RAM usage
+#192.168.56.103 es_node_name=node3
 
 [kibana]
 192.168.56.99 kibana_node_name=kibana_system
+
+[nginx]
+192.168.56.98 nginx_node_name=nginx_proxy
